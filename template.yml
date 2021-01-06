@@ -1,0 +1,190 @@
+Description: "Microservice API and Auth settings"
+Transform: "AWS::Serverless-2016-10-31"
+
+Parameters:
+  YourEmail:
+    Type: String
+  Version:
+    Type: String
+    Default: v1
+
+  # Parameters for api
+  CorsOrigin:
+    Description: Header Access-Control-Allow-Origin
+    Default: "'*'"
+    Type: String
+  CorsMethods:
+    Description: Header Access-Control-Allow-Headers
+    Default: "'*'"
+    Type: String
+  CorsHeaders:
+    Description: Header Access-Control-Allow-Headers
+    Default: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    Type: String
+  SwaggerS3File:
+    Description: 'S3 "swagger.yaml" file location'
+    Default: "./swagger_api_cognito.yaml"
+    Type: String
+
+
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+    MemorySize: 512
+    Runtime: python3.6
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      UserPoolName: TestingUsers
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireLowercase: true
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+  UserPoolTokenClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - USER_PASSWORD_AUTH
+
+  UserPoolUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      DesiredDeliveryMediums:
+        - EMAIL
+      Username: !Ref YourEmail
+      UserPoolId: !Ref UserPool
+      UserAttributes:
+        - Name: email
+          Value: !Ref YourEmail
+
+  AdminUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      Description: Admin user group
+      Precedence: 0
+      UserPoolId: !Ref UserPool
+
+  AddUserToGroup:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      GroupName: !Ref AdminUserGroup
+      UserName: !Ref UserPoolUser
+      UserPoolId: !Ref UserPool
+
+  ApiGatewayLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: !Join [ "", [ "/", !Ref "AWS::StackName", "/" ] ]
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowApiGatewayServiceToAssumeRole
+            Effect: Allow
+            Action:
+              - 'sts:AssumeRole'
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Policies:
+        - PolicyName: "LambdaExecutionAndCWLogging"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "lambda:*"
+                  - "logs:*"
+                Resource:
+                  - "*"
+  ServiceApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-service-api
+      StageName: !Ref Version
+      DefinitionBody:
+        'Fn::Transform':
+          Name: AWS::Include
+          Parameters:
+            # s3 location of the swagger file
+            Location: s3://my-api-documents/swagger_api_cognito.yaml
+#            Location: !Ref SwaggerS3File
+#      Auth:
+#        Authorizers:
+#          CognitoAuthorizer:
+#            UserPoolArn: !GetAtt "UserPool.Arn"
+  Authorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: CognitoAuthorizer
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref ServiceApi
+      ProviderARNs:
+        - !GetAtt "UserPool.Arn"
+
+  OpenLambdaFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: functions/hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.6
+      Events:
+        HelloWorldOpen:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /open
+            RestApiId: !Ref ServiceApi
+            Method: GET
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/hello_world_post/
+      Handler: app.lambda_handler
+      Runtime: python3.6
+      Events:
+        HelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /
+            RestApiId: !Ref ServiceApi
+            Method: POST
+#            Auth:
+#              DefaultAuthorizer: !Ref Authorizer
+#              AddDefaultAuthorizerToCorsPreflight: False
+Outputs:
+  CognitoID:
+    Description: The Cognito UserPool ID
+    Value: !Ref UserPool
+  CognitoClientID:
+    Description: The Cognito UserPool Client ID
+    Value: !Ref UserPoolTokenClient
+  ApiUrl:
+    Description: The API URL
+    Value: !Sub "https://${ServiceApi}.execute-api.${AWS::Region}.amazonaws.com/${Version}"
+
+#  HelloWorldApi:
+#    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
+#    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
+#  HelloWorldFunction:
+#    Description: "Hello World Lambda Function ARN"
+#    Value: !GetAtt HelloWorldFunction.Arn
+#  HelloWorldFunctionIamRole:
+#    Description: "Implicit IAM Role created for Hello World function"
+#    Value: !GetAtt HelloWorldFunctionRole.Arn

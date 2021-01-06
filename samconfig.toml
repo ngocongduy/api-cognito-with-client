@@ -1,0 +1,11 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "api-cognito"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1sd0k50un2lnl"
+s3_prefix = "api-cognito"
+region = "ap-southeast-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = "YourEmail=\"ngocongduy1888012@gmail.com\" Version=\"v1\" CorsOrigin=\"'*'\" CorsMethods=\"'*'\" CorsHeaders=\"'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'\" SwaggerS3File=\"./swagger_api_cognito.yaml\""
